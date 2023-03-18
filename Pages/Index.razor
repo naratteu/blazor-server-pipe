@@ -1,3 +1,58 @@
 ﻿@page "/"
+@using System.Diagnostics
+@using System.Collections.Concurrent
+@using System.Text.Json
+@using Microsoft.AspNetCore.Components.Forms
+@inject IJSRuntime js
 
-<h1>Hello, world!</h1>
+<h3>mp3 소리3배 증폭</h3>
+<InputText DisplayName=@nameof(root) @bind-Value=root />
+<InputText DisplayName=@nameof(file) @bind-Value=file />
+<InputText DisplayName=@nameof(args) @bind-Value=args />
+<InputFile OnChange=LoadFiles />
+<hr>
+@((MarkupString)string.Join("<br>", log))
+
+@code {
+    [Parameter] public string root { get; set; } = Path.Combine(Environment.CurrentDirectory, "unsafe_uploads");
+    [Parameter] public string file { get; set; } = "ffmpeg.exe";
+    [Parameter] public string args { get; set; } = $"-f mp3 -i pipe:0 -filter:a \"volume=3\" -f mp3 pipe:1";
+    readonly ConcurrentQueue<object> log = new();
+
+    private async Task LoadFiles(InputFileChangeEventArgs e)
+    {
+        try
+        {
+            log.Enqueue($"LoadFiles : {JsonSerializer.Serialize(e)}"); StateHasChanged();
+            using var p = new System.Diagnostics.Process
+            {
+                StartInfo = new(Path.Combine(root, file), args)
+                {
+                    WorkingDirectory = root,
+                    RedirectStandardInput = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    StandardInputEncoding = System.Text.Encoding.UTF8,
+                    StandardOutputEncoding = System.Text.Encoding.UTF8,
+                    StandardErrorEncoding = System.Text.Encoding.UTF8,
+                },
+            };
+            p.ErrorDataReceived += async (_, e) => { log.Enqueue($"<span style='color: gray;'>{e.Data}</span>"); await InvokeAsync(StateHasChanged); };
+            var ProcessStart = p.Start(); p.BeginErrorReadLine();
+            log.Enqueue(new { ProcessStart }); StateHasChanged();
+
+            using (DotNetStreamReference streamRef = new(p.StandardOutput.BaseStream))
+            {
+                var f = e.File;
+                var send = js.InvokeVoidAsync("downloadFileFromStream", "out." + f.Name, streamRef);
+                await using var ors = f.OpenReadStream(f.Size); //https://learn.microsoft.com/aspnet/core/blazor/file-uploads?view=aspnetcore-7.0&pivots=server#upload-files-example
+                await ors.CopyToAsync(p.StandardInput.BaseStream); p.StandardInput.BaseStream.Close();
+                await send;
+            }
+            log.Enqueue("WaitForExit"); StateHasChanged();
+            await p.WaitForExitAsync();
+        }
+        catch (Exception ex) { log.Enqueue($"<span style='color: red;'>{ex}</span>"); }
+        finally { log.Enqueue("Finally"); }
+    }
+}

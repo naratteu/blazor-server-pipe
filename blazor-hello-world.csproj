@@ -7,4 +7,10 @@
     <RootNamespace>blazor_hello_world</RootNamespace>
   </PropertyGroup>
 
+  <ItemGroup>
+    <None Update="unsafe_uploads\ffmpeg.exe">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>
